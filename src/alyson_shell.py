@@ -126,6 +126,7 @@ class AlysonShell(Cmd):
 
     def do_tokenize(self, inp):
         '''Encode a string using a tokenizer ( > tokenize <tokenizer> <string>)'''
+
         words = inp.split(" ")
         tokenizer_name = words[0]
         string = " ".join(words[1:])

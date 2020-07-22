@@ -59,6 +59,7 @@ class WhatsappParser:
     
     def parse_file(self, filename, chat_id=0):
         '''Parse messages from a Whatsapp chat log using multiprocessing'''
+
         lines = open(filename, encoding="utf8").readlines()[-2<<14:]
 
         # Multiprocessing
@@ -83,6 +84,7 @@ class WhatsappParser:
 
     def encode_senders(self):
         '''Encode the sender names as numbers'''
+
         # Make a dictionary of all of the people
         c = Counter(map(lambda m: m.sender, self.messages)).most_common()
         c = [_[0] for _ in c]
@@ -95,6 +97,7 @@ class WhatsappParser:
 
     def flatten(self):
         '''Concatenate the contents of all of the messages into a single string'''
+
         return ''.join([_.content for _ in self.messages])
 
     def __del_rare(self, messages, rare, return_dict, return_id):
@@ -108,6 +111,7 @@ class WhatsappParser:
 
     def del_rare(self, amount):
         '''Remove messages that contains rare characters'''
+
         c = Counter(self.flatten()).most_common()
         rare = c[amount:]
         rare = [_[0] for _ in rare]
@@ -135,6 +139,7 @@ class WhatsappParser:
 
     def gen_tokenizer(self):
         '''Create a WordPiece tokenizer from the parsed data'''
+
         # Store the flattened text in a temporary file
         f = tempfile.NamedTemporaryFile()
         text = self.flatten()
