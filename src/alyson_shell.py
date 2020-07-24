@@ -5,6 +5,7 @@ from cmd import Cmd
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" # Disable unnecesarry TensorFlow logs
 import numpy as np
 import tensorflow as tf
+from tokenizers import Tokenizer
 
 import whatsapp_parser
 
@@ -69,14 +70,14 @@ class AlysonShell(Cmd):
         
         # List the files to parse
         if len(words) == 1:
-            print("No files given to parse")
+            print("Invalid usage")
             return
 
         files = np.array([])
         files = np.concatenate((files, *[glob.glob(_) for _ in words[1:]]))
 
         if len(files) == 0:
-            print("No files given to parse")
+            print("Invalid files")
             return
 
         w_parsers[parser_name] = whatsapp_parser.WhatsappParser(processes) # Create a new Whatsapp parser
@@ -88,41 +89,79 @@ class AlysonShell(Cmd):
             except IsADirectoryError:
                 print("Skipping \"{}\" as it is not a file...".format(f))
 
-        w_parsers[parser_name].sender_to_id()
-        print([_[0] for _ in w_parsers[parser_name].people.items()]) # Show all the people known
+    def do_normalizetime(self, inp):
+        '''Normalize time ( > normalizetime <parser>)'''
+
+        # Parse the Whatsapp parser name
+        parser_name = inp.split(" ")[0] 
+        try:
+            w_parsers[parser_name].normalize_time()
+        except KeyError:
+            print("Unknown parser: {}".format(parser_name))
 
     def do_parsers(self, inp):
         '''Show a list of defined parsers'''
 
         [print(k) for k, v in w_parsers.items()]
 
-    def do_cleanrare(self, inp):
-        '''Clean messages containing rarely used characters ( > cleanrare <parser_name> <num_of_characters_to_preserve>)'''
+    def do_showmessage(self, inp):
+        '''Print a message by its id ( > showmessage <parser> <id>)'''
 
         words = inp.split(" ")
         if len(words) != 2:
             print("Invalid usage")
             return
 
-        w_parsers[words[0]].del_rare(int(words[1]))
+        try:
+            i = int(words[1])
+            print(w_parsers[words[0]].messages[i])
+        except KeyError:
+            print("Unknown parser: {}".format(words[0]))
+        except ValueError:
+            print("Invalid id")
 
     def do_encodesenders(self, inp):
         '''Give an ID number to each sender ( > encodesenders <parser_name>)'''
 
         parser_name = inp.split(" ")[0]
         if parser_name == "":
-            print("Invalid usage: parser_name unspecified")
+            print("Invalid usage")
             return
 
         w_parsers[parser_name].encode_senders()
+
+    def do_aparse(self, inp):
+        '''Parse multiple files and do additional processing ( > parse <parser_name> file1 file2 dir/*)'''
+
+        # Normal parsing
+        self.do_parse(inp)
+
+        # Get the parser name
+        parser_name = inp.split(" ")[0]
+
+        # Encode senders as numbers
+        w_parsers[parser_name].encode_senders()
+        print([_[0] for _ in w_parsers[parser_name].people.items()]) # Show all the known people
+
+        # Normalize the time encoding
+        self.do_normalizetime(parser_name)
+        print("Time delta: {}".format(w_parsers[parser_name].time_delta))
 
     def do_gentoken(self, inp):
         '''Create a new WordPiece tokenizer from a parser ( > gentoken <tokenizer_name> <parser_name>)'''
 
         words = inp.split(" ")
+        if len(words) != 2:
+            print("Invalid usage")
+            return
+        
         tokenizer_name, parser_name = words[0], words[1]
 
-        tokenizers[tokenizer_name] = w_parsers[parser_name].gen_tokenizer()
+        try:
+            tokenizers[tokenizer_name] = w_parsers[parser_name].gen_tokenizer()
+        except KeyError:
+            print("Unknown parser: {}".format(parser_name))
+            return
 
     def do_tokenize(self, inp):
         '''Encode a string using a tokenizer ( > tokenize <tokenizer> <string>)'''
@@ -131,9 +170,43 @@ class AlysonShell(Cmd):
         tokenizer_name = words[0]
         string = " ".join(words[1:])
         
-        t = tokenizers[tokenizer_name].encode(string)
+        try:
+            t = tokenizers[tokenizer_name].encode(string)
+        except KeyError:
+            print("Unknown tokenizer: {}".format(tokenizer_name))
+            return
         print(t.ids)
         print(t.tokens)
 
+    def do_exporttoken(self, inp):
+        '''Export a tokenizer to a file ( > exporttoken <tokenizer> <filename>)'''
+
+        words = inp.split(" ")
+        if len(words) != 2:
+            print("Invalid usage")
+            return
+
+        tokenizer_name, filename = words
+
+        try:
+            tokenizers[tokenizer_name].save(filename)
+        except KeyError:
+            print("Unknown tokenizer: {}".format(tokenizer_name))
+
+        print("Exported to {}".format(filename))
+
+    def do_loadtoken(self, inp):
+        '''Load a tokenizer from a file ( > loadtoken <tokenizer> <filename>)'''
+
+        words = inp.split(" ")
+        if len(words) != 2:
+            print("Invalid usage")
+            return
+
+        tokenizer_name, filename = words
+        if not os.path.isfile(filename):
+            print("No such file: {}".format(filename))
+
+        tokenizers[tokenizer_name] = Tokenizer.from_file(filename)
 
 AlysonShell().cmdloop()

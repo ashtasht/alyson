@@ -7,7 +7,7 @@ import numpy as np
 from collections import Counter
 from tokenizers import BertWordPieceTokenizer
 
-omitted_strings = ["<media omitted>", "messages to this chat and calls are now secured with end-to-end encryption. tap for more info.", "you deleted this message", "this message was deleted"]
+omitted_strings = ["<media omitted>", "messages to this chat and calls are now secured with end-to-end encryption. tap for more info.", "you deleted this message", "this message was deleted", "missed voice call"]
 
 class Message:
     def __init__(self, time, sender, content, i, chat_id):
@@ -18,7 +18,10 @@ class Message:
         self.chat_id = chat_id
 
     def __str__(self):
-        dt = datetime.datetime.fromtimestamp(self.time * 3600).strftime('%m/%d/%y, %H:%M')
+        if self.time > 2<<16:
+            dt = datetime.datetime.fromtimestamp(self.time * 3600).strftime('%d/%m/%Y, %H:%M')
+        else:
+            dt = self.time
         return "{}. {} - {}: {}".format(self.i, dt, self.sender, self.content)
 
 class WhatsappParser:
@@ -29,6 +32,7 @@ class WhatsappParser:
             self.processes = processes
         self.messages = []
         self.people = {} # Name to id
+        self.time_delta = 0
 
         self.manager = multiprocessing.Manager()
     
@@ -40,14 +44,23 @@ class WhatsappParser:
 
             if all(_ not in l for _ in omitted_strings):
                 try:
-                    month, day, year = l.split("/", 3)
+                    day, month, year = l.split("/", 3)
                     year, hour = year.split(", ", 1)
                     hour, minute = hour.split(":", 1)
                     minute, sender = minute.split(" - ", 1)
                     sender, content = sender.split(": ", 1)
                     content = content[:-1]
 
-                    time = int(datetime.datetime(2000 + int(year), int(month), int(day), int(hour), int(minute)).timestamp() / 3600)
+                    if minute[-1] == "m":
+                        if minute[-2] == "p":
+                            hour = int(hour) + 12
+
+                        minute = minute[:2]
+
+                    if int(year) < 2000:
+                        year = int(year) + 2000
+
+                    time = int(datetime.datetime(int(year), int(month), int(day), int(hour), int(minute)).timestamp() / 3600)
 
                     m = Message(time, sender, content, i=i + start_id, chat_id=chat_id)
 
@@ -100,44 +113,17 @@ class WhatsappParser:
 
         return ''.join([_.content for _ in self.messages])
 
-    def __del_rare(self, messages, rare, return_dict, return_id):
-        m = []
+    def normalize_time(self, delta=None):
+        '''Normalize the time and date on all the messages'''
+        if delta is None:
+            delta = - sum([_.time for _ in self.messages]) // len(self.messages)
 
-        for _ in messages:
-            if not any(map(lambda c: c in rare, _.content)):
-                m.append(_)
-
-        return_dict[return_id] = m
-
-    def del_rare(self, amount):
-        '''Remove messages that contains rare characters'''
-
-        c = Counter(self.flatten()).most_common()
-        rare = c[amount:]
-        rare = [_[0] for _ in rare]
-
-        # Multiprocessing
-        chunk_size = len(self.messages) // self.processes
-
-        return_dict = self.manager.dict()
-
-        jobs = []
-        for j in range(self.processes):
-            l = self.messages[j * chunk_size:(j + 1) * chunk_size]
-            jobs.append(multiprocessing.Process(target=self.__del_rare, args=(l, rare, return_dict, j)))
-
-        for j in jobs:
-            j.start()
+        self.time_delta += delta
         
-        for j in jobs:
-            j.join()
+        for i, m in enumerate(self.messages):
+            self.messages[i].time += delta
 
-        # Flatten the return_dict
-        self.messages = []
-        for _ in return_dict.values():
-            self.messages = np.concatenate((self.messages, _))
-
-    def gen_tokenizer(self):
+    def gen_tokenizer(self, min_frequency=6, limit_alphabet=150):
         '''Create a WordPiece tokenizer from the parsed data'''
 
         # Store the flattened text in a temporary file
@@ -147,7 +133,7 @@ class WhatsappParser:
 
         # Create the tokenizer
         tokenizer = BertWordPieceTokenizer()
-        tokenizer.train([f.name])
+        tokenizer.train([f.name], min_frequency=min_frequency, limit_alphabet=limit_alphabet)
         f.close()
 
         return tokenizer
